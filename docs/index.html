@@ -111,10 +111,16 @@ async function refresh() {
     document.getElementById("wr").textContent = s.stats.winrate + " %";
     document.getElementById("pf").textContent = "profit factor : " + s.stats.profit_factor;
 
-    const ageMin = (Date.now() - new Date(s.updated_gmt.replace(" ", "T") + "Z").getTime()) / 60000;
-    document.getElementById("sub").textContent = "Dernière mise à jour du robot : " + s.updated + " (heure serveur broker) — il y a " + Math.max(0, Math.round(ageMin)) + " min";
-    document.getElementById("dot").className = "dot" + (ageMin > 120 ? " stale" : "");
-    document.getElementById("warn").style.display = ageMin > 120 ? "block" : "none";
+    // format MT5 "2026.07.02 12:00:00" -> ISO
+    const ts = new Date(s.updated_gmt.replace(/\./g, "-").replace(" ", "T") + "Z").getTime();
+    const ageMin = isNaN(ts) ? null : (Date.now() - ts) / 60000;
+    const hasData = s.account && s.account.login > 0;
+    document.getElementById("sub").textContent = hasData && ageMin !== null
+      ? "Dernière mise à jour du robot : " + s.updated + " (heure serveur broker) — il y a " + Math.max(0, Math.round(ageMin)) + " min"
+      : "En attente de la première mise à jour du robot depuis le VPS…";
+    const stale = !hasData || ageMin === null || ageMin > 120;
+    document.getElementById("dot").className = "dot" + (stale ? " stale" : "");
+    document.getElementById("warn").style.display = (hasData && ageMin !== null && ageMin > 120) ? "block" : "none";
 
     const fill = (id, rows, render, emptyMsg, cols) => {
       const el = document.getElementById(id);
