@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HappyGold Clone — Monitoring</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #21262d;
+    --txt: #e6edf3; --muted: #8b949e;
+    --green: #3fb950; --red: #f85149; --gold: #d4a017; --blue: #58a6ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--txt); font-family: "Segoe UI", system-ui, sans-serif; padding: 20px; }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 20px; display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  h1 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); display: inline-block; }
+  h1 .dot.stale { background: var(--red); }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .card .lbl { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .card .val { font-size: 24px; font-weight: 600; margin-top: 4px; }
+  .card .val.pos { color: var(--green); } .card .val.neg { color: var(--red); }
+  .card .det { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+  .panel h2 { font-size: 14px; color: var(--gold); margin-bottom: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  canvas { width: 100%; height: 220px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  .buy { color: var(--green); font-weight: 600; } .sell { color: var(--red); font-weight: 600; }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+  .empty { color: var(--muted); font-style: italic; padding: 10px 8px; }
+  .warn { background: #3d1d1d; border: 1px solid var(--red); color: #ffb3ae; border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; display: none; }
+  @media (max-width: 640px) { .card .val { font-size: 19px; } body { padding: 10px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="dot" id="dot"></span> HappyGold Clone — compte démo</h1>
+  <div class="sub" id="sub">chargement…</div>
+  <div class="warn" id="warn">⚠️ Pas de mise à jour depuis plus de 2 heures — vérifier que le VPS et MT5 tournent.</div>
+
+  <div class="cards">
+    <div class="card"><div class="lbl">Équité</div><div class="val" id="equity">—</div><div class="det" id="floating"></div></div>
+    <div class="card"><div class="lbl">Solde</div><div class="val" id="balance">—</div><div class="det" id="account"></div></div>
+    <div class="card"><div class="lbl">Profit total (45 j)</div><div class="val" id="ptotal">—</div><div class="det" id="ntrades"></div></div>
+    <div class="card"><div class="lbl">Winrate</div><div class="val" id="wr">—</div><div class="det" id="pf"></div></div>
+  </div>
+
+  <div class="panel"><h2>Courbe d'équité</h2><canvas id="chart" width="1060" height="220"></canvas></div>
+
+  <div class="panel"><h2>Positions ouvertes</h2>
+    <table><thead><tr><th>Heure</th><th>Symbole</th><th>Sens</th><th>Lots</th><th>Entrée</th><th>SL</th><th>TP</th><th>P&amp;L</th></tr></thead>
+    <tbody id="positions"></tbody></table></div>
+
+  <div class="panel"><h2>Ordres en attente (les pièges posés)</h2>
+    <table><thead><tr><th>Posé à</th><th>Symbole</th><th>Type</th><th>Lots</th><th>Prix</th><th>SL</th><th>TP</th></tr></thead>
+    <tbody id="orders"></tbody></table></div>
+
+  <div class="panel"><h2>Derniers trades fermés</h2>
+    <table><thead><tr><th>Heure</th><th>Symbole</th><th>Sens</th><th>Lots</th><th>Sortie</th><th>P&amp;L</th><th>Note</th></tr></thead>
+    <tbody id="deals"></tbody></table></div>
+
+  <div class="sub">Mise à jour automatique par le robot toutes les heures · page rafraîchie toutes les 5 min</div>
+</div>
+
+<script>
+const RAW_URL = "https://raw.githubusercontent.com/Fulflock/hgclone-monitor/main/data/state.json";
+const fmt = (v, cur) => Number(v).toLocaleString("fr-FR", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + (cur ? " " + cur : "");
+const cls = v => v > 0 ? "pos" : v < 0 ? "neg" : "";
+
+function drawChart(hist) {
+  const c = document.getElementById("chart"), ctx = c.getContext("2d");
+  const W = c.width = c.offsetWidth * 2, H = c.height = 440;
+  ctx.clearRect(0, 0, W, H);
+  if (!hist || hist.length < 2) { ctx.fillStyle = "#8b949e"; ctx.font = "24px sans-serif"; ctx.fillText("Pas encore assez de points (revenez dans quelques heures)", 20, H/2); return; }
+  const eq = hist.map(p => p.eq), bal = hist.map(p => p.bal);
+  const all = eq.concat(bal), mn = Math.min(...all) * 0.999, mx = Math.max(...all) * 1.001;
+  const X = i => 40 + (W - 60) * i / (hist.length - 1);
+  const Y = v => H - 30 - (H - 60) * (v - mn) / (mx - mn || 1);
+  ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1; ctx.fillStyle = "#8b949e"; ctx.font = "20px sans-serif";
+  for (let g = 0; g <= 4; g++) { const v = mn + (mx - mn) * g / 4, y = Y(v);
+    ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W - 20, y); ctx.stroke();
+    ctx.fillText(Math.round(v).toLocaleString("fr-FR"), 4, y - 4); }
+  const line = (arr, color, w) => { ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath();
+    arr.forEach((v, i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(0), Y(v))); ctx.stroke(); };
+  line(bal, "#58a6ff", 2); line(eq, "#d4a017", 3);
+  ctx.fillStyle = "#d4a017"; ctx.fillText("— équité", W - 260, 28);
+  ctx.fillStyle = "#58a6ff"; ctx.fillText("— solde", W - 130, 28);
+}
+
+async function refresh() {
+  try {
+    const r = await fetch(RAW_URL + "?t=" + Date.now(), {cache: "no-store"});
+    if (!r.ok) throw new Error(r.status);
+    const s = await r.json();
+    const cur = s.account.currency;
+    document.getElementById("equity").textContent = fmt(s.account.equity, cur);
+    const fl = document.getElementById("floating");
+    fl.textContent = "flottant : " + fmt(s.account.floating, cur);
+    fl.className = "det " + cls(s.account.floating);
+    document.getElementById("balance").textContent = fmt(s.account.balance, cur);
+    document.getElementById("account").textContent = "#" + s.account.login + " · " + s.account.server;
+    const pt = document.getElementById("ptotal");
+    pt.textContent = fmt(s.stats.profit_total, cur);
+    pt.className = "val " + cls(s.stats.profit_total);
+    document.getElementById("ntrades").textContent = s.stats.n + " trades fermés";
+    document.getElementById("wr").textContent = s.stats.winrate + " %";
+    document.getElementById("pf").textContent = "profit factor : " + s.stats.profit_factor;
+
+    const ageMin = (Date.now() - new Date(s.updated_gmt.replace(" ", "T") + "Z").getTime()) / 60000;
+    document.getElementById("sub").textContent = "Dernière mise à jour du robot : " + s.updated + " (heure serveur broker) — il y a " + Math.max(0, Math.round(ageMin)) + " min";
+    document.getElementById("dot").className = "dot" + (ageMin > 120 ? " stale" : "");
+    document.getElementById("warn").style.display = ageMin > 120 ? "block" : "none";
+
+    const fill = (id, rows, render, emptyMsg, cols) => {
+      const el = document.getElementById(id);
+      el.innerHTML = rows && rows.length ? rows.map(render).join("") : `<tr><td class="empty" colspan="${cols}">${emptyMsg}</td></tr>`;
+    };
+    fill("positions", s.positions, p => `<tr><td>${p.time}</td><td>${p.symbol}</td><td class="${p.type}">${p.type.toUpperCase()}</td><td>${p.volume}</td><td>${p.entry}</td><td>${p.sl}</td><td>${p.tp}</td><td class="${cls(p.profit)}">${fmt(p.profit, cur)}</td></tr>`,
+      "aucune position ouverte (normal : les trades durent quelques secondes)", 8);
+    fill("orders", s.orders, o => `<tr><td>${o.time}</td><td>${o.symbol}</td><td class="${o.type.startsWith("buy") ? "buy" : "sell"}">${o.type.toUpperCase()}</td><td>${o.volume}</td><td>${o.price}</td><td>${o.sl}</td><td>${o.tp}</td></tr>`,
+      "aucun ordre en attente (hors session 6h-22h broker, ou pas de niveau valide)", 7);
+    fill("deals", s.deals, d => `<tr><td>${d.time}</td><td>${d.symbol}</td><td class="${d.side}">${d.side.toUpperCase()}</td><td>${d.volume}</td><td>${d.price}</td><td class="${cls(d.profit)}">${fmt(d.profit, cur)}</td><td>${d.comment || ""}</td></tr>`,
+      "aucun trade fermé pour l'instant", 7);
+    drawChart(s.history);
+  } catch (e) {
+    document.getElementById("sub").textContent = "En attente des premières données du robot… (" + e.message + ")";
+  }
+}
+refresh();
+setInterval(refresh, 5 * 60 * 1000);
+</script>
+</body>
+</html>
