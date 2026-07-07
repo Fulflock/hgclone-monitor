@@ -17,15 +17,16 @@
   h1 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); display: inline-block; }
   h1 .dot.stale { background: var(--red); }
   .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
   .card .lbl { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
-  .card .val { font-size: 24px; font-weight: 600; margin-top: 4px; }
+  .card .val { font-size: 23px; font-weight: 600; margin-top: 4px; }
   .card .val.pos { color: var(--green); } .card .val.neg { color: var(--red); }
   .card .det { color: var(--muted); font-size: 12px; margin-top: 2px; }
   .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 20px; }
   .panel h2 { font-size: 14px; color: var(--gold); margin-bottom: 12px; text-transform: uppercase; letter-spacing: .05em; }
-  canvas { width: 100%; height: 220px; }
+  .panel h2 small { color: var(--muted); text-transform: none; letter-spacing: 0; font-weight: 400; }
+  canvas { width: 100%; display: block; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
   td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
@@ -34,6 +35,8 @@
   .pos { color: var(--green); } .neg { color: var(--red); }
   .empty { color: var(--muted); font-style: italic; padding: 10px 8px; }
   .warn { background: #3d1d1d; border: 1px solid var(--red); color: #ffb3ae; border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; display: none; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
   @media (max-width: 640px) { .card .val { font-size: 19px; } body { padding: 10px; } }
 </style>
 </head>
@@ -46,11 +49,25 @@
   <div class="cards">
     <div class="card"><div class="lbl">Équité</div><div class="val" id="equity">—</div><div class="det" id="floating"></div></div>
     <div class="card"><div class="lbl">Solde</div><div class="val" id="balance">—</div><div class="det" id="account"></div></div>
-    <div class="card"><div class="lbl">Profit total (45 j)</div><div class="val" id="ptotal">—</div><div class="det" id="ntrades"></div></div>
     <div class="card"><div class="lbl">Winrate</div><div class="val" id="wr">—</div><div class="det" id="pf"></div></div>
+    <div class="card"><div class="lbl">Profit total</div><div class="val" id="ptotal">—</div><div class="det" id="ntrades"></div></div>
   </div>
 
-  <div class="panel"><h2>Courbe d'équité</h2><canvas id="chart" width="1060" height="220"></canvas></div>
+  <div class="cards">
+    <div class="card"><div class="lbl">Aujourd'hui</div><div class="val" id="pnlDay">—</div><div class="det" id="nDay"></div></div>
+    <div class="card"><div class="lbl">Cette semaine</div><div class="val" id="pnlWeek">—</div><div class="det" id="nWeek"></div></div>
+    <div class="card"><div class="lbl">Ce mois</div><div class="val" id="pnlMonth">—</div><div class="det" id="nMonth"></div></div>
+    <div class="card"><div class="lbl">Depuis le début</div><div class="val" id="pnlPct">—</div><div class="det">vs solde de départ</div></div>
+  </div>
+
+  <div class="panel"><h2>Courbe d'équité</h2><canvas id="chart" height="440"></canvas></div>
+
+  <div class="panel"><h2>PnL journalier <small>— chaque barre = gain/perte du jour</small></h2><canvas id="daily" height="360"></canvas></div>
+
+  <div class="grid2">
+    <div class="panel"><h2>PnL hebdomadaire</h2><canvas id="weekly" height="360"></canvas></div>
+    <div class="panel"><h2>PnL mensuel</h2><canvas id="monthly" height="360"></canvas></div>
+  </div>
 
   <div class="panel"><h2>Positions ouvertes</h2>
     <table><thead><tr><th>Heure</th><th>Symbole</th><th>Sens</th><th>Lots</th><th>Entrée</th><th>SL</th><th>TP</th><th>P&amp;L</th></tr></thead>
@@ -64,32 +81,90 @@
     <table><thead><tr><th>Heure</th><th>Symbole</th><th>Sens</th><th>Lots</th><th>Sortie</th><th>P&amp;L</th><th>Note</th></tr></thead>
     <tbody id="deals"></tbody></table></div>
 
-  <div class="sub">Mise à jour automatique par le robot toutes les heures · page rafraîchie toutes les 5 min</div>
+  <div class="sub">Mise à jour automatique par le robot toutes les heures · page rafraîchie toutes les 5 min · heures = heure serveur du broker</div>
 </div>
 
 <script>
 const RAW_URL = "https://raw.githubusercontent.com/Fulflock/hgclone-monitor/main/data/state.json";
 const fmt = (v, cur) => Number(v).toLocaleString("fr-FR", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + (cur ? " " + cur : "");
+const sign = v => (v > 0 ? "+" : "") + v.toLocaleString("fr-FR", {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const cls = v => v > 0 ? "pos" : v < 0 ? "neg" : "";
 
-function drawChart(hist) {
+// --- parsing date broker "2026.07.07 15:09:43" ---
+function parseDT(s) { return new Date(s.replace(/\./g, "-").replace(" ", "T")); }
+function dayKey(d) { return d.toISOString().slice(0, 10); }
+function monthKey(d) { return d.toISOString().slice(0, 7); }
+function isoWeek(d) {
+  const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - day);
+  const yStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  const wk = Math.ceil(((dt - yStart) / 86400000 + 1) / 7);
+  return dt.getUTCFullYear() + "-S" + String(wk).padStart(2, "0");
+}
+
+function bucket(deals, keyFn) {
+  const m = new Map();
+  for (const t of deals) {
+    const d = parseDT(t.time);
+    if (isNaN(d)) continue;
+    const k = keyFn(d);
+    if (!m.has(k)) m.set(k, {pnl: 0, n: 0});
+    const b = m.get(k); b.pnl += Number(t.profit); b.n++;
+  }
+  return [...m.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1); // chrono
+}
+
+// --- bar chart PnL (vert/rouge autour du zéro) ---
+function drawBars(id, data, cur, maxBars) {
+  const c = document.getElementById(id), ctx = c.getContext("2d");
+  const W = c.width = c.offsetWidth * 2, H = c.height = c.height ? c.offsetHeight * 2 : 720;
+  ctx.clearRect(0, 0, W, H);
+  if (!data.length) { ctx.fillStyle = "#8b949e"; ctx.font = "22px sans-serif"; ctx.fillText("Aucune donnée pour l'instant", 20, H / 2); return; }
+  data = data.slice(-maxBars);
+  const vals = data.map(d => d[1].pnl);
+  const mx = Math.max(0.01, ...vals), mn = Math.min(0, ...vals);
+  const pad = 44, padB = 60, padT = 20;
+  const zeroY = padT + (H - padT - padB) * (mx / (mx - mn || 1));
+  const Y = v => padT + (H - padT - padB) * ((mx - v) / (mx - mn || 1));
+  // grille + axe zéro
+  ctx.strokeStyle = "#30363d"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(pad, zeroY); ctx.lineTo(W - 10, zeroY); ctx.stroke();
+  ctx.fillStyle = "#8b949e"; ctx.font = "20px sans-serif"; ctx.textAlign = "right";
+  ctx.fillText("0", pad - 6, zeroY + 6);
+  ctx.fillText(Math.round(mx).toLocaleString("fr-FR"), pad - 6, Y(mx) + 14);
+  if (mn < 0) ctx.fillText(Math.round(mn).toLocaleString("fr-FR"), pad - 6, Y(mn) - 4);
+  const n = data.length, gap = 6, bw = Math.max(3, (W - pad - 14 - gap * n) / n);
+  ctx.textAlign = "center";
+  data.forEach((d, i) => {
+    const v = d[1].pnl, x = pad + gap / 2 + i * (bw + gap);
+    ctx.fillStyle = v >= 0 ? "#3fb950" : "#f85149";
+    const top = Math.min(Y(v), zeroY), h = Math.max(2, Math.abs(Y(v) - zeroY));
+    ctx.fillRect(x, top, bw, h);
+    // label espacé pour lisibilité
+    const step = Math.ceil(n / 12);
+    if (i % step === 0 || i === n - 1) {
+      ctx.fillStyle = "#8b949e"; ctx.font = "18px sans-serif";
+      let lbl = d[0].replace(/^\d{4}-/, "");
+      ctx.save(); ctx.translate(x + bw / 2, H - padB + 22); ctx.rotate(-0.5);
+      ctx.fillText(lbl, 0, 0); ctx.restore();
+    }
+  });
+}
+
+function drawEquity(hist) {
   const c = document.getElementById("chart"), ctx = c.getContext("2d");
   const W = c.width = c.offsetWidth * 2, H = c.height = 440;
   ctx.clearRect(0, 0, W, H);
-  if (!hist || hist.length < 2) { ctx.fillStyle = "#8b949e"; ctx.font = "24px sans-serif"; ctx.fillText("Pas encore assez de points (revenez dans quelques heures)", 20, H/2); return; }
-  const eq = hist.map(p => p.eq), bal = hist.map(p => p.bal);
-  const all = eq.concat(bal), mn = Math.min(...all) * 0.999, mx = Math.max(...all) * 1.001;
-  const X = i => 40 + (W - 60) * i / (hist.length - 1);
+  if (!hist || hist.length < 2) { ctx.fillStyle = "#8b949e"; ctx.font = "22px sans-serif"; ctx.fillText("Courbe disponible après quelques heures de données", 20, H / 2); return; }
+  const eq = hist.map(p => p.eq), bal = hist.map(p => p.bal), all = eq.concat(bal);
+  const mn = Math.min(...all) * 0.999, mx = Math.max(...all) * 1.001;
+  const X = i => 44 + (W - 64) * i / (hist.length - 1);
   const Y = v => H - 30 - (H - 60) * (v - mn) / (mx - mn || 1);
-  ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1; ctx.fillStyle = "#8b949e"; ctx.font = "20px sans-serif";
-  for (let g = 0; g <= 4; g++) { const v = mn + (mx - mn) * g / 4, y = Y(v);
-    ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W - 20, y); ctx.stroke();
-    ctx.fillText(Math.round(v).toLocaleString("fr-FR"), 4, y - 4); }
-  const line = (arr, color, w) => { ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath();
-    arr.forEach((v, i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(0), Y(v))); ctx.stroke(); };
+  ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1; ctx.fillStyle = "#8b949e"; ctx.font = "18px sans-serif"; ctx.textAlign = "left";
+  for (let g = 0; g <= 4; g++) { const v = mn + (mx - mn) * g / 4, y = Y(v); ctx.beginPath(); ctx.moveTo(44, y); ctx.lineTo(W - 20, y); ctx.stroke(); ctx.fillText(Math.round(v).toLocaleString("fr-FR"), 4, y - 4); }
+  const line = (arr, color, w) => { ctx.strokeStyle = color; ctx.lineWidth = w; ctx.beginPath(); arr.forEach((v, i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(0), Y(v))); ctx.stroke(); };
   line(bal, "#58a6ff", 2); line(eq, "#d4a017", 3);
-  ctx.fillStyle = "#d4a017"; ctx.fillText("— équité", W - 260, 28);
-  ctx.fillStyle = "#58a6ff"; ctx.fillText("— solde", W - 130, 28);
+  ctx.fillStyle = "#d4a017"; ctx.fillText("— équité", W - 280, 28); ctx.fillStyle = "#58a6ff"; ctx.fillText("— solde", W - 150, 28);
 }
 
 async function refresh() {
@@ -99,46 +174,54 @@ async function refresh() {
     const s = await r.json();
     const cur = s.account.currency;
     document.getElementById("equity").textContent = fmt(s.account.equity, cur);
-    const fl = document.getElementById("floating");
-    fl.textContent = "flottant : " + fmt(s.account.floating, cur);
-    fl.className = "det " + cls(s.account.floating);
+    const fl = document.getElementById("floating"); fl.textContent = "flottant : " + fmt(s.account.floating, cur); fl.className = "det " + cls(s.account.floating);
     document.getElementById("balance").textContent = fmt(s.account.balance, cur);
     document.getElementById("account").textContent = "#" + s.account.login + " · " + s.account.server;
-    const pt = document.getElementById("ptotal");
-    pt.textContent = fmt(s.stats.profit_total, cur);
-    pt.className = "val " + cls(s.stats.profit_total);
-    document.getElementById("ntrades").textContent = s.stats.n + " trades fermés";
     document.getElementById("wr").textContent = s.stats.winrate + " %";
     document.getElementById("pf").textContent = "profit factor : " + s.stats.profit_factor;
+    const pt = document.getElementById("ptotal"); pt.textContent = sign(Number(s.stats.profit_total)) + " " + cur; pt.className = "val " + cls(s.stats.profit_total);
+    document.getElementById("ntrades").textContent = s.stats.n + " trades";
 
-    // format MT5 "2026.07.02 12:00:00" -> ISO
-    const ts = new Date(s.updated_gmt.replace(/\./g, "-").replace(" ", "T") + "Z").getTime();
-    const ageMin = isNaN(ts) ? null : (Date.now() - ts) / 60000;
+    // --- PnL par période (calculé depuis les trades) ---
+    const deals = s.deals || [];
+    const ref = parseDT(s.updated_gmt && s.updated_gmt !== "1970.01.01 00:00:00" ? s.updated : (deals[0] ? deals[0].time : "2000.01.01 00:00:00"));
+    const kD = isNaN(ref) ? "" : dayKey(ref), kW = isNaN(ref) ? "" : isoWeek(ref), kM = isNaN(ref) ? "" : monthKey(ref);
+    const bDay = bucket(deals, dayKey), bWeek = bucket(deals, isoWeek), bMonth = bucket(deals, monthKey);
+    const find = (arr, k) => (arr.find(e => e[0] === k) || [null, {pnl: 0, n: 0}])[1];
+    const setCard = (idV, idN, b) => { const el = document.getElementById(idV); el.textContent = sign(b.pnl) + " " + cur; el.className = "val " + cls(b.pnl); document.getElementById(idN).textContent = b.n + " trade" + (b.n > 1 ? "s" : ""); };
+    setCard("pnlDay", "nDay", find(bDay, kD));
+    setCard("pnlWeek", "nWeek", find(bWeek, kW));
+    setCard("pnlMonth", "nMonth", find(bMonth, kM));
+    // % depuis le début : solde actuel vs (solde - profit total)
+    const start = Number(s.account.balance) - Number(s.stats.profit_total);
+    const pct = start > 0 ? (Number(s.stats.profit_total) / start * 100) : 0;
+    const pp = document.getElementById("pnlPct"); pp.textContent = (pct >= 0 ? "+" : "") + pct.toFixed(1) + " %"; pp.className = "val " + cls(pct);
+
+    const ageMin = isNaN(parseDT(s.updated_gmt)) ? null : (Date.now() - new Date(s.updated_gmt.replace(/\./g, "-").replace(" ", "T") + "Z").getTime()) / 60000;
     const hasData = s.account && s.account.login > 0;
     document.getElementById("sub").textContent = hasData && ageMin !== null
-      ? "Dernière mise à jour du robot : " + s.updated + " (heure serveur broker) — il y a " + Math.max(0, Math.round(ageMin)) + " min"
+      ? "Dernière mise à jour du robot : " + s.updated + " (heure serveur) — il y a " + Math.max(0, Math.round(ageMin)) + " min"
       : "En attente de la première mise à jour du robot depuis le VPS…";
     const stale = !hasData || ageMin === null || ageMin > 120;
     document.getElementById("dot").className = "dot" + (stale ? " stale" : "");
     document.getElementById("warn").style.display = (hasData && ageMin !== null && ageMin > 120) ? "block" : "none";
 
-    const fill = (id, rows, render, emptyMsg, cols) => {
-      const el = document.getElementById(id);
-      el.innerHTML = rows && rows.length ? rows.map(render).join("") : `<tr><td class="empty" colspan="${cols}">${emptyMsg}</td></tr>`;
-    };
-    fill("positions", s.positions, p => `<tr><td>${p.time}</td><td>${p.symbol}</td><td class="${p.type}">${p.type.toUpperCase()}</td><td>${p.volume}</td><td>${p.entry}</td><td>${p.sl}</td><td>${p.tp}</td><td class="${cls(p.profit)}">${fmt(p.profit, cur)}</td></tr>`,
-      "aucune position ouverte (normal : les trades durent quelques secondes)", 8);
-    fill("orders", s.orders, o => `<tr><td>${o.time}</td><td>${o.symbol}</td><td class="${o.type.startsWith("buy") ? "buy" : "sell"}">${o.type.toUpperCase()}</td><td>${o.volume}</td><td>${o.price}</td><td>${o.sl}</td><td>${o.tp}</td></tr>`,
-      "aucun ordre en attente (hors session 6h-22h broker, ou pas de niveau valide)", 7);
-    fill("deals", s.deals, d => `<tr><td>${d.time}</td><td>${d.symbol}</td><td class="${d.side}">${d.side.toUpperCase()}</td><td>${d.volume}</td><td>${d.price}</td><td class="${cls(d.profit)}">${fmt(d.profit, cur)}</td><td>${d.comment || ""}</td></tr>`,
-      "aucun trade fermé pour l'instant", 7);
-    drawChart(s.history);
+    const fill = (id, rows, render, emptyMsg, cols) => { const el = document.getElementById(id); el.innerHTML = rows && rows.length ? rows.map(render).join("") : `<tr><td class="empty" colspan="${cols}">${emptyMsg}</td></tr>`; };
+    fill("positions", s.positions, p => `<tr><td>${p.time}</td><td>${p.symbol}</td><td class="${p.type}">${p.type.toUpperCase()}</td><td>${p.volume}</td><td>${p.entry}</td><td>${p.sl}</td><td>${p.tp}</td><td class="${cls(p.profit)}">${fmt(p.profit, cur)}</td></tr>`, "aucune position ouverte (normal : les trades durent quelques secondes)", 8);
+    fill("orders", s.orders, o => `<tr><td>${o.time}</td><td>${o.symbol}</td><td class="${o.type.startsWith("buy") ? "buy" : "sell"}">${o.type.toUpperCase()}</td><td>${o.volume}</td><td>${o.price}</td><td>${o.sl}</td><td>${o.tp}</td></tr>`, "aucun ordre en attente (hors session 6h-22h serveur, ou pas de niveau valide)", 7);
+    fill("deals", deals, d => `<tr><td>${d.time}</td><td>${d.symbol}</td><td class="${d.side}">${d.side.toUpperCase()}</td><td>${d.volume}</td><td>${d.price}</td><td class="${cls(d.profit)}">${fmt(d.profit, cur)}</td><td>${d.comment || ""}</td></tr>`, "aucun trade fermé pour l'instant", 7);
+
+    drawEquity(s.history);
+    drawBars("daily", bDay, cur, 30);
+    drawBars("weekly", bWeek, cur, 12);
+    drawBars("monthly", bMonth, cur, 12);
   } catch (e) {
     document.getElementById("sub").textContent = "En attente des premières données du robot… (" + e.message + ")";
   }
 }
 refresh();
 setInterval(refresh, 5 * 60 * 1000);
+window.addEventListener("resize", refresh);
 </script>
 </body>
 </html>
