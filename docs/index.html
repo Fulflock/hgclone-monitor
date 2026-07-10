@@ -177,13 +177,22 @@ async function refresh() {
     const fl = document.getElementById("floating"); fl.textContent = "flottant : " + fmt(s.account.floating, cur); fl.className = "det " + cls(s.account.floating);
     document.getElementById("balance").textContent = fmt(s.account.balance, cur);
     document.getElementById("account").textContent = "#" + s.account.login + " · " + s.account.server;
-    document.getElementById("wr").textContent = s.stats.winrate + " %";
-    document.getElementById("pf").textContent = "profit factor : " + s.stats.profit_factor;
-    const pt = document.getElementById("ptotal"); pt.textContent = sign(Number(s.stats.profit_total)) + " " + cur; pt.className = "val " + cls(s.stats.profit_total);
-    document.getElementById("ntrades").textContent = s.stats.n + " trades";
 
-    // --- PnL par période (calculé depuis les trades) ---
-    const deals = s.deals || [];
+    // --- FILTRE : ne garder que les trades de l'algo (les 3 manuels sont d'avant ALGO_START) ---
+    const ALGO_START = "2026.07.03";
+    const deals = (s.deals || []).filter(d => (d.time || "") >= ALGO_START && d.symbol === "XAUUSD");
+    // stats recalculées sur les seuls trades de l'algo (au lieu de s.stats qui inclut le manuel)
+    const nT = deals.length, nW = deals.filter(d => Number(d.profit) > 0).length;
+    const pTot = deals.reduce((a, d) => a + Number(d.profit), 0);
+    const gW = deals.filter(d => Number(d.profit) > 0).reduce((a, d) => a + Number(d.profit), 0);
+    const gL = deals.filter(d => Number(d.profit) < 0).reduce((a, d) => a - Number(d.profit), 0);
+    const st = { n: nT, winrate: nT ? (100 * nW / nT).toFixed(1) : "0", profit_total: pTot, profit_factor: gL > 0 ? (gW / gL).toFixed(2) : (gW > 0 ? "∞" : "0") };
+    document.getElementById("wr").textContent = st.winrate + " %";
+    document.getElementById("pf").textContent = "profit factor : " + st.profit_factor;
+    const pt = document.getElementById("ptotal"); pt.textContent = sign(pTot) + " " + cur; pt.className = "val " + cls(pTot);
+    document.getElementById("ntrades").textContent = st.n + " trades";
+
+    // --- PnL par période (calculé depuis les trades de l'algo) ---
     const ref = parseDT(s.updated_gmt && s.updated_gmt !== "1970.01.01 00:00:00" ? s.updated : (deals[0] ? deals[0].time : "2000.01.01 00:00:00"));
     const kD = isNaN(ref) ? "" : dayKey(ref), kW = isNaN(ref) ? "" : isoWeek(ref), kM = isNaN(ref) ? "" : monthKey(ref);
     const bDay = bucket(deals, dayKey), bWeek = bucket(deals, isoWeek), bMonth = bucket(deals, monthKey);
@@ -192,9 +201,9 @@ async function refresh() {
     setCard("pnlDay", "nDay", find(bDay, kD));
     setCard("pnlWeek", "nWeek", find(bWeek, kW));
     setCard("pnlMonth", "nMonth", find(bMonth, kM));
-    // % depuis le début : solde actuel vs (solde - profit total)
-    const start = Number(s.account.balance) - Number(s.stats.profit_total);
-    const pct = start > 0 ? (Number(s.stats.profit_total) / start * 100) : 0;
+    // % depuis le début (algo seul) : profit algo / solde de départ estimé
+    const start = Number(s.account.balance) - pTot;
+    const pct = start > 0 ? (pTot / start * 100) : 0;
     const pp = document.getElementById("pnlPct"); pp.textContent = (pct >= 0 ? "+" : "") + pct.toFixed(1) + " %"; pp.className = "val " + cls(pct);
 
     const ageMin = isNaN(parseDT(s.updated_gmt)) ? null : (Date.now() - new Date(s.updated_gmt.replace(/\./g, "-").replace(" ", "T") + "Z").getTime()) / 60000;
